@@ -1,0 +1,121 @@
+1. install kpack
+   kubectl apply -f https://github.com/pivotal/kpack/releases/download/v0.5.4/release-0.5.4.yaml
+
+2. kubectl get pods --namespace kpack
+
+   # notice that controller and webhook are installed
+
+3. kubectl api-resources | grep -i kpack
+
+   builders                          bldr,bldrs                    kpack.io/v1alpha2                      true         Builder
+   builds                            cnbbuild,cnbbuilds,bld,blds   kpack.io/v1alpha2                      true         Build
+   clusterbuilders                   clstbldr,clstbldrs            kpack.io/v1alpha2                      false        ClusterBuilder
+   clusterstacks                                                   kpack.io/v1alpha2                      false        ClusterStack
+   clusterstores                                                   kpack.io/v1alpha2                      false        ClusterStore
+   images                            cnbimage,cnbimages,img,imgs   kpack.io/v1alpha2                      true         Image
+   sourceresolvers                                                 kpack.io/v1alpha2                      true         SourceResolver
+
+
+   ######
+   1. clusterstack is the image we are building on, and the image as the base for our application
+   2. clusterstore: A store resource is a repository of buildpacks packaged in buildpackages that can be used by kpack to build OCI images
+      (it would probably make more sense if you open up: https://github.com/paketo-buildpacks/java and look at all the
+       included packages). This is the code that basically "guesses" what your app is and how to treat it.
+   3. builders/clusterbuilder are (1) and (2) put together. Basically it's a "dockerfile" of your app, without an actual file of course.
+
+4. Let's create a clusterstore first.
+   You can issue and notice that we have nothing yet.
+
+   kubectl get clusterstore
+   kubectl apply -f cluster-store.yaml
+   kubectl get clusterstore ### one will be here
+
+   ## to see what images it is made of
+   kubectl describe clusterstore default
+
+5. kubectl apply -f cluster-stack.yaml
+
+   # stack are the images that we are building on and "from" if you think about dockerfiles
+
+6. I am going to use dockerhub as my registry, so need to create a secret:
+
+   kubectl create secret docker-registry docker-registry-credentials \
+       --docker-username=<YOUR_DOCKER_USERNAME> \
+       --docker-password=<YOU_DOCKER_PASSWORD> \
+       --docker-server=https://index.docker.io/v1/ \
+       --namespace default
+
+7. kubectl apply -f service-account.yaml
+
+8. kubectl apply -f builder.yaml
+
+   ##### tag is very important here and must follow docker format
+   ##### you can check that it is correctly set-up, by doing a "docker login" and then a "docker push"
+   ##### of a dummy image
+
+   ## see that builder is OK
+   kubectl describe builder my-builder
+   kubectl get builder my-builder
+
+9. once the builder is ready, you can inspect it:
+
+   pack inspect-builder erabii/builder
+
+   # it will show you what buildpacks is this builder made of
+
+10. we can now create an image(pod), that will pull the repository and build an image out of it.
+    the sole purpose of this config is to pull the image, but we specify the "Builder", that will
+    build the actual OCI image.
+
+    kubectl create -f image.yaml
+    kubectl get images
+    kubectl get builds
+
+    # image (CRD of kpack) realizes that there is something to build,
+    # so it creates a "build" (kubectl get builds) that will be responsible for this work
+    # a build is like a "proxy" between the actual pulling of the code and the oci image.
+    # the work being done is done in a pod (kubectl get pods)
+
+    # the above is slightly miss-leading, as nothing actually happens in a pod, all it happens in
+    # are init containers, many of them. So if something goes wrong you can look into the
+    # container of the pod (init-containers...) that build the image.
+
+    # because of that when something goes wrong you can look into each individual container of the pod, for example:
+
+    kubectl logs kpack-sandbox8tqrj-build-1-build-pod -c prepare
+
+11. If the image is created fine, then you can do:
+
+    kubectl get images (1)
+    kubectl get builds (2)
+    kubectl get pods   (3)
+
+    # let's take this slowly here.
+    # (1) will show just one image, that we have created. it has a builder made from cluster-store and cluster-stack
+
+    # (2) will show up to 10 builds. We said (in the image) that we want to pull a git repo, and it does exactly that.
+    # For each task it will create a build (remember that this is like a proxy), this in turn will spawn a pod
+    # that will actually do nothing.
+
+    # (3) this one will show 10 pods also, that each "build" (2), will generate.
+
+    # when something changes on github (a new revision is pushed), the (1) -> (3) process will work again, this time
+    # creating an actual image.
+
+12. This has a serious drawback - we need new tags, for each release, for example. Which means we will need to edit
+    the yaml file all the time. There is a CLI for this : "kp".
+
+    So we could do :
+
+    kp image create kpack-sandbox --namespace default --builder my-builder --tag <YOUR_TAG> --git <YOUR_GIT_REPO>
+      --git-revision <YOUR_GIT_REVISION_OR_BRANCH>
+
+
+THIS has helped me quite a lot into getting this running:
+
+   https://www.youtube.com/watch?v=fbSoKu8NGSU
+   https://www.youtube.com/watch?v=ShE_j4V_2iQ
+
+
+
+

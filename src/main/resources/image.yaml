@@ -1,0 +1,17 @@
+apiVersion: kpack.io/v1alpha2
+kind: Image
+metadata:
+  generateName: kpack-sandbox
+  namespace: default
+spec:
+  tag: erabii/kpack-sandbox
+  additionalTags:
+    - erabii/kpack-sandbox:latest
+  serviceAccountName: docker-credentials-service-account
+  builder:
+    name: my-builder
+    kind: Builder
+  source:
+    git:
+      url: https://github.com/ciberkleid/hello-java.git
+      revision: main
